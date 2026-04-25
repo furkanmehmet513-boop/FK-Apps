@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FK Cipher - Güvenli Çevrimdışı Şifreleme</title>
+    <style>
+        :root {
+            --bg-color: #0e1310;
+            --surface-color: #181d1b;
+            --accent-color: #1DB954;
+            --text-color: #e0e0e0;
+            --error-color: #ff4444;
+            --border-radius: 8px;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        h1 { color: var(--accent-color); text-align: center; margin-bottom: 10px; }
+
+        label { font-size: 0.9rem; margin-bottom: 5px; display: block; color: var(--accent-color); }
+
+        textarea, input {
+            width: 100%;
+            background-color: var(--surface-color);
+            border: 1px solid #2a2f2d;
+            color: var(--text-color);
+            padding: 12px;
+            border-radius: var(--border-radius);
+            box-sizing: border-box;
+            font-size: 1rem;
+            outline: none;
+        }
+
+        textarea:focus, input:focus { border-color: var(--accent-color); }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        button {
+            min-height: 44px;
+            cursor: pointer;
+            border: none;
+            border-radius: var(--border-radius);
+            font-weight: bold;
+            transition: opacity 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+        }
+
+        button:active { opacity: 0.7; }
+
+        .btn-primary { background-color: var(--accent-color); color: #000; }
+        .btn-secondary { background-color: #333; color: #fff; }
+
+        .action-bar { display: flex; gap: 10px; margin-top: 5px; }
+        .action-bar button { flex: 1; min-height: 44px; }
+
+        #statusMsg {
+            text-align: center;
+            font-size: 0.85rem;
+            min-height: 20px;
+        }
+        .error { color: var(--error-color); }
+        .success { color: var(--accent-color); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>FK Cipher</h1>
+        
+        <div>
+            <label>Giriş Metni</label>
+            <textarea id="inputText" rows="5" placeholder="Şifrelenecek veya çözülecek metni buraya yazın..."></textarea>
+        </div>
+
+        <div>
+            <label>Şifre (Anahtar)</label>
+            <input type="password" id="password" placeholder="Güçlü bir şifre girin">
+        </div>
+
+        <div class="controls">
+            <button class="btn-primary" onclick="handleAction('encrypt')">ŞİFRELE</button>
+            <button class="btn-primary" onclick="handleAction('decrypt')">ÇÖZ</button>
+        </div>
+
+        <div id="statusMsg"></div>
+
+        <div>
+            <label>Sonuç</label>
+            <textarea id="outputText" rows="5" readonly placeholder="Sonuç burada görünecek..."></textarea>
+        </div>
+
+        <div class="action-bar">
+            <button class="btn-secondary" onclick="copyToClipboard()">Kopyala</button>
+            <button class="btn-secondary" onclick="saveAsTxt()">Dosya Olarak Kaydet</button>
+        </div>
+    </div>
+<script>
+    // UI Yardımcıları
+    function setStatus(msg, isError = false) {
+        const el = document.getElementById('statusMsg');
+        el.textContent = msg;
+        el.className = isError ? 'error' : 'success';
+        if(msg) setTimeout(() => el.textContent = '', 5000);
+    }
+
+    async function copyToClipboard() {
+        const text = document.getElementById('outputText').value;
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            setStatus("Panoya kopyalandı!");
+        } catch (err) {
+            setStatus("Kopyalama başarısız", true);
+        }
+    }
+
+    function saveAsTxt() {
+        const text = document.getElementById('outputText').value;
+        if (!text) return;
+        const blob = new Blob([text], { type: 'text/plain' });
+        const anchor = document.createElement('a');
+        anchor.download = "fk_cipher_output.txt";
+        anchor.href = window.URL.createObjectURL(blob);
+        anchor.click();
+        window.URL.revokeObjectURL(anchor.href);
+    }
+
+    async function handleAction(type) {
+        const text = document.getElementById('inputText').value;
+        const pass = document.getElementById('password').value;
+        const outputField = document.getElementById('outputText');
+
+        if (!text || !pass) {
+            setStatus("Lütfen metin ve şifre girin!", true);
+            return;
+        }
+
+        try {
+            if (type === 'encrypt') {
+                outputField.value = await encryptData(text, pass);
+                setStatus("Şifreleme başarılı.");
+            } else {
+                outputField.value = await decryptData(text, pass);
+                setStatus("Çözme başarılı.");
+            }
+        } catch (e) {
+            outputField.value = "";
+            setStatus("Hata: Şifre yanlış veya veri bozuk!", true);
+        }
+    }
+    // Kripto Fonksiyonları
+    const ITERATIONS = 100000;
+    const SALT_LEN = 16;
+    const IV_LEN = 12;
+
+    async function deriveKey(password, salt) {
+        const enc = new TextEncoder();
+        const keyMaterial = await crypto.subtle.importKey(
+            "raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]
+        );
+        return crypto.subtle.deriveKey(
+            { name: "PBKDF2", salt: salt, iterations: ITERATIONS, hash: "SHA-256" },
+            keyMaterial,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"]
+        );
+    }
+
+    async function encryptData(text, password) {
+        const salt = crypto.getRandomValues(new Uint8Array(SALT_LEN));
+        const iv = crypto.getRandomValues(new Uint8Array(IV_LEN));
+        const key = await deriveKey(password, salt);
+        const encodedText = new TextEncoder().encode(text);
+
+        const encrypted = await crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: iv },
+            key,
+            encodedText
+        );
+
+        const combined = new Uint8Array(SALT_LEN + IV_LEN + encrypted.byteLength);
+        combined.set(salt, 0);
+        combined.set(iv, SALT_LEN);
+        combined.set(new Uint8Array(encrypted), SALT_LEN + IV_LEN);
+
+        return btoa(String.fromCharCode(...combined));
+    }
+
+    async function decryptData(cipherBase64, password) {
+        const combined = new Uint8Array(atob(cipherBase64).split("").map(c => c.charCodeAt(0)));
+        const salt = combined.slice(0, SALT_LEN);
+        const iv = combined.slice(SALT_LEN, SALT_LEN + IV_LEN);
+        const data = combined.slice(SALT_LEN + IV_LEN);
+
+        const key = await deriveKey(password, salt);
+
+        const decrypted = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: iv },
+            key,
+            data
+        );
+
+        return new TextDecoder().decode(decrypted);
+    }
+</script>
+</body>
+</html>
